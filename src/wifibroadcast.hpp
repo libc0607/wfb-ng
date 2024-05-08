@@ -62,15 +62,42 @@ extern std::string string_format(const char *format, ...);
 #define	IEEE80211_RADIOTAP_MCS_STBC_3  3
 #define	IEEE80211_RADIOTAP_MCS_STBC_SHIFT 5
 
+#define IEEE80211_RADIOTAP_VHT_FLAG_STBC    0x01
+#define IEEE80211_RADIOTAP_VHT_FLAG_SGI     0x04
+#define	IEEE80211_RADIOTAP_VHT_MCS_MASK     0xF0
+#define	IEEE80211_RADIOTAP_VHT_NSS_MASK     0x0F
+#define	IEEE80211_RADIOTAP_VHT_MCS_SHIFT    4
+#define	IEEE80211_RADIOTAP_VHT_NSS_SHIFT    0
+#define IEEE80211_RADIOTAP_VHT_BW_80M       0x04
+#define IEEE80211_RADIOTAP_VHT_BW_160M      0x0B
+#define IEEE80211_RADIOTAP_VHT_CODING_LDPC_USER0    0x01
+
+
 #define MCS_KNOWN (IEEE80211_RADIOTAP_MCS_HAVE_MCS | IEEE80211_RADIOTAP_MCS_HAVE_BW | IEEE80211_RADIOTAP_MCS_HAVE_GI | IEEE80211_RADIOTAP_MCS_HAVE_STBC | IEEE80211_RADIOTAP_MCS_HAVE_FEC)
 
-static uint8_t radiotap_header[]  __attribute__((unused)) = {
+static uint8_t radiotap_header_ht[]  __attribute__((unused)) = {
     0x00, 0x00, // <-- radiotap version
     0x0d, 0x00, // <- radiotap header length
     0x00, 0x80, 0x08, 0x00, // <-- radiotap present flags:  RADIOTAP_TX_FLAGS + RADIOTAP_MCS
     0x08, 0x00,  // RADIOTAP_F_TX_NOACK
     MCS_KNOWN , 0x00, 0x00 // bitmap, flags, mcs_index
 };
+
+static uint8_t radiotap_header_vht[]  __attribute__((unused)) = {
+    0x00, 0x00, // <-- radiotap version
+    0x14, 0x00, // <- radiotap header length
+    0x00, 0x00, 0x20, 0x00, // <-- radiotap present flags: VHT Information
+    0x45, 0x00, // Known VHT information: 0000 0000 0100 0101, BW, GI, STBC
+    0x00,       // Flags, BIT(0)=STBC, BIT(2)=GI
+    0x04,       // BW, 0:20M, 1:40M, 4:80, 11:160
+    0x00, 0x00, 0x00, 0x00, // MCS_NSS[0:3]
+    0x00,       // Coding[3:0], BCC/LDPC
+    0x00,       // Group ID, not used
+    0x00, 0x00  // Partial AID, not used
+};
+
+__attribute__((unused)) static uint8_t* radiotap_header = radiotap_header_ht;
+__attribute__((unused)) static uint8_t  radiotap_header_len = sizeof(radiotap_header_ht);
 
 #define WIFI_MTU  1500  // WiFi interface mtu. You can increase it if your card allow larger packets,
                         // but this can lead to interoperability issues and/or kernel crashes.
@@ -87,6 +114,12 @@ static uint8_t radiotap_header[]  __attribute__((unused)) = {
 // offset of MCS_FLAGS and MCS index
 #define MCS_FLAGS_OFF 11
 #define MCS_IDX_OFF 12
+
+// offset of VHT information
+#define VHT_FLAGS_OFF 10
+#define VHT_BW_OFF 11
+#define VHT_MCSNSS0_OFF 12
+#define VHT_CODING_OFF 16
 
 //the last four bytes used for channel_id
 #define SRC_MAC_THIRD_BYTE 12

@@ -192,7 +192,7 @@ void RawSocketTransmitter::inject_packet(const uint8_t *buf, size_t size)
         {
             // radiotap header
             { .iov_base = (void*)radiotap_header,
-              .iov_len = sizeof(radiotap_header)
+              .iov_len = radiotap_header_len
             },
             // ieee80211 header
             { .iov_base = (void*)ieee_hdr,
@@ -553,13 +553,15 @@ int main(int argc, char * const *argv)
     int stbc = 0;
     int ldpc = 0;
     int mcs_index = 1;
+    int vht_nss = 1;
     int debug_port = 0;
     int fec_timeout = 0;
     int rcv_buf = 0;
     bool mirror = false;
+    bool vht_mode = false;
     string keypair = "tx.key";
 
-    while ((opt = getopt(argc, argv, "K:k:n:u:p:l:B:G:S:L:M:D:T:i:e:R:f:m")) != -1) {
+    while ((opt = getopt(argc, argv, "K:k:n:u:p:l:B:G:S:L:M:N:D:T:i:e:R:f:m")) != -1) {
         switch (opt) {
         case 'K':
             keypair = optarg;
@@ -593,6 +595,9 @@ int main(int argc, char * const *argv)
             break;
         case 'M':
             mcs_index = atoi(optarg);
+            break;
+      	case 'N':
+            vht_nss = atoi(optarg);
             break;
         case 'D':
             debug_port = atoi(optarg);
@@ -631,10 +636,10 @@ int main(int argc, char * const *argv)
             break;
         default: /* '?' */
         show_usage:
-            fprintf(stderr, "Usage: %s [-K tx_key] [-k RS_K] [-n RS_N] [-u udp_port] [-R rcv_buf] [-p radio_port] [-B bandwidth] [-G guard_interval] [-S stbc] [-L ldpc] [-M mcs_index] [-T fec_timeout] [-l log_interval] [-e epoch] [-i link_id] [-f { data | rts }] [ -m ] interface1 [interface2] ...\n",
+            fprintf(stderr, "Usage: %s [-K tx_key] [-k RS_K] [-n RS_N] [-u udp_port] [-R rcv_buf] [-p radio_port] [-B bandwidth] [-G guard_interval] [-S stbc] [-L ldpc] [-M mcs_index] [-N VHT_NSS] [-T fec_timeout] [-l log_interval] [-e epoch] [-i link_id] [-f { data | rts }] [ -m ] interface1 [interface2] ...\n",
                     argv[0]);
-            fprintf(stderr, "Default: K='%s', k=%d, n=%d, udp_port=%d, link_id=0x%06x, radio_port=%u, epoch=%" PRIu64 ", bandwidth=%d guard_interval=%s stbc=%d ldpc=%d mcs_index=%d, fec_timeout=%d, log_interval=%d, rcv_buf=system_default, frame_type=data, mirror=false\n",
-                    keypair.c_str(), k, n, udp_port, link_id, radio_port, epoch, bandwidth, short_gi ? "short" : "long", stbc, ldpc, mcs_index, fec_timeout, log_interval);
+            fprintf(stderr, "Default: K='%s', k=%d, n=%d, udp_port=%d, link_id=0x%06x, radio_port=%u, epoch=%" PRIu64 ", bandwidth=%d guard_interval=%s stbc=%d ldpc=%d mcs_index=%d vht_nss=%d, fec_timeout=%d, log_interval=%d, rcv_buf=system_default, frame_type=data, mirror=false\n",
+                    keypair.c_str(), k, n, udp_port, link_id, radio_port, epoch, bandwidth, short_gi ? "short" : "long", stbc, ldpc, mcs_index, vht_nss, fec_timeout, log_interval);
             fprintf(stderr, "Radio MTU: %lu\n", (unsigned long)MAX_PAYLOAD_SIZE);
             fprintf(stderr, "WFB-ng version " WFB_VERSION "\n");
             fprintf(stderr, "WFB-ng home page: <http://wfb-ng.org>\n");
@@ -646,9 +651,15 @@ int main(int argc, char * const *argv)
         goto show_usage;
     }
 
+    // Only use VHT when BW set to 80 or higher
+    if (bandwidth >= 80) {
+        vht_mode = true;
+    }
+    
     // Set flags in radiotap header
+    uint8_t flags = 0;
+    if (!vht_mode) 
     {
-        uint8_t flags = 0;
         switch(bandwidth) {
         case 20:
             flags |= IEEE80211_RADIOTAP_MCS_BW_20;
@@ -688,8 +699,47 @@ int main(int argc, char * const *argv)
             flags |= IEEE80211_RADIOTAP_MCS_FEC_LDPC;
         }
 
-        radiotap_header[MCS_FLAGS_OFF] = flags;
-        radiotap_header[MCS_IDX_OFF] = mcs_index;
+        radiotap_header_ht[MCS_FLAGS_OFF] = flags;
+        radiotap_header_ht[MCS_IDX_OFF] = mcs_index;
+
+        radiotap_header = radiotap_header_ht;
+        radiotap_header_len = sizeof(radiotap_header_ht);
+    } 
+    else
+    {
+        if (short_gi)
+        {
+            flags |= IEEE80211_RADIOTAP_VHT_FLAG_SGI;
+        }
+
+        if (stbc) 
+        {
+            flags |= IEEE80211_RADIOTAP_VHT_FLAG_STBC;
+        }
+        
+        switch(bandwidth) {
+        case 80:
+            radiotap_header_vht[VHT_BW_OFF] = IEEE80211_RADIOTAP_VHT_BW_80M;
+            break;
+        case 160:
+            radiotap_header_vht[VHT_BW_OFF] = IEEE80211_RADIOTAP_VHT_BW_160M;
+            break;
+        default:
+            fprintf(stderr, "Unsupported bandwidth: %d\n", bandwidth);
+            exit(1);
+        }
+
+        if (ldpc)
+        {
+            radiotap_header_vht[VHT_CODING_OFF] = IEEE80211_RADIOTAP_VHT_CODING_LDPC_USER0;
+        }
+
+        radiotap_header_vht[VHT_FLAGS_OFF] = flags;
+        radiotap_header_vht[VHT_MCSNSS0_OFF] |= ((mcs_index<<IEEE80211_RADIOTAP_VHT_MCS_SHIFT) & IEEE80211_RADIOTAP_VHT_MCS_MASK);
+        radiotap_header_vht[VHT_MCSNSS0_OFF] |= ((vht_nss<<IEEE80211_RADIOTAP_VHT_NSS_SHIFT) & IEEE80211_RADIOTAP_VHT_NSS_MASK);
+        
+        radiotap_header = radiotap_header_vht;
+        radiotap_header_len = sizeof(radiotap_header_vht);
     }
 
     {
